@@ -16,14 +16,14 @@ def default_cut(start_time,n):
     """
     :param n: number of cameras
     """
-    times = [[start_time-1,0],[start_time,0]]
-    time = start_time
+    times = [[start_time-1,0],[start_time+2.0/25,0]]
+    time = start_time+2.0/25
     for i in range(n-1):
-        time = time + 1.0/25
+        time = time + 2.0/25
         times.append([time,i+1])
         
     time = round(time*25)/25
-    times.append([time+1])
+    times.append([time+1 + 2.0/25])
     return times
     
     
@@ -261,29 +261,39 @@ class edit:
         for time in self.trigger_times:
             for j,record_times in enumerate(self.record_times):
                 if time >= record_times[0] and time <= record_times[1]:
-                    start = (time - record_times[0]).total_seconds() + self.latency[j]
-                    times = cut(start,len(self.filenames[j]))
-                    filenames = []
-                    slowmo = {}
-                    for i,camera in enumerate(self.cameras):
-                        if camera in self.slowmo_cameras:
-                            if os.path.exists(os.path.join(self.basefolder,camera+"_slow")):
-                                slowmo[i] = self.slowmo_cameras[camera]
-                                new_path = os.path.abspath(os.path.join(self.basefolder,camera+"_slow",os.path.split(self.filenames[j][i][0])[1]))
-                                filenames.append([new_path,self.filenames[j][i][1]])
+                    if count >=0:
+                        start = (time - record_times[0]).total_seconds() + self.latency[j]
+                        times = cut(start,len(self.filenames[j]))
+                        filenames = []
+                        slowmo = {}
+                        for i,camera in enumerate(self.cameras):
+                            if camera in self.slowmo_cameras:
+                                if os.path.exists(os.path.join(self.basefolder,camera+"_slow")):
+                                    slowmo[i] = self.slowmo_cameras[camera]
+                                    new_path = os.path.abspath(os.path.join(self.basefolder,camera+"_slow",os.path.split(self.filenames[j][i])[1]))
+                                    filenames.append([new_path,self.filenames[j][i][1]])
+                                else:
+                                    print camera+" does not have a slow version. Run reinterpret. Using normal version."
+                                    filenames.append(self.filenames[j][i])
                             else:
-                                print camera+" does not have a slow version. Run reinterpret. Using normal version."
                                 filenames.append(self.filenames[j][i])
-                        else:
-                            filenames.append(self.filenames[j][i])
-                                
-                    seq = MultiCam.MultiCam(filenames,
-                        times=times,shift=self.shift[j],slowmo=slowmo)
-                    video = seq.get_clip(**self.concat_args)
-                    #######video.write
-                    video.to_videofile(filename+str(count)+extension,**kwargs)
-                    del video
-                    del seq
+                                    
+                        seq = MultiCam.MultiCam(filenames,
+                            times=times,shift=self.shift[j],slowmo=slowmo)
+                        video = seq.get_clip(**self.concat_args)
+                        video.to_videofile(filename+str(count)+extension,**kwargs)
+                        ##### clean up #####
+                        for c in video.clips:
+                            if isinstance(c,VideoFileClip):
+                                c.reader.close()
+                                if c.audio:
+                                    c.audio.reader.close_proc()
+                        for c in seq.clips:
+                            c.reader.close()
+                            if c.audio:
+                                c.audio.reader.close_proc()
+                        del video
+                        del seq
                     count = count + 1
 
     
