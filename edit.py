@@ -4,6 +4,8 @@
 import os
 import sys
 from moviepy.video.compositing import MultiCam
+from moviepy.video.io.VideoFileClip import VideoFileClip
+from moviepy.video.io.preview import show, preview
 import numpy as np
 import datetime
 import csv
@@ -68,7 +70,7 @@ class edit:
             self.trigger_times_file = trigger_times_file
         
         if record_times_file == None:
-            self.record_times_file = base_folder + '/record_times.csv'
+            self.record_times_file = base_folder + '/recording_times.csv'
         else:
             self.record_times_file = record_times_file
             
@@ -153,27 +155,34 @@ class edit:
         trigger_times = []
 
         if save:
-            f = open(self.trigget_times_file, 'wb')
+            f = open(self.trigger_times_file, 'wb')
             writer = csv.writer(f)
 
         for i,record_times in enumerate(self.record_times):
             
             # load each clip individualy to save memory
-            clip = VideoFileClip(self.filenames[i][0][0]+self.filenames[i][0][1], audio=False)
-            
-            print "Click to record time."
-            times = clip.preview(fps=5,audio=False,func=get_time)
-            for t in times:
-                print record_times[0]+datetime.timedelta(0,t)
-                biker_times.append(record_times[0]+datetime.timedelta(0,t))
-                if save:
-                    writer.writerow([str(record_times[0]+datetime.timedelta(0,t))])
-            clip.reader.close_proc()
-        self.times = times
+            if i>=0:
+                clip = VideoFileClip(self.filenames[i][0], audio=False)
+                
+                print "Click to record time."
+                try:
+                    times = preview(clip,fps=5,audio=False,func=get_time)
+                    for t in times:
+                        print record_times[0]+datetime.timedelta(0,t)
+                        trigger_times.append(record_times[0]+datetime.timedelta(0,t))
+                        if save:
+                            writer.writerow([str(record_times[0]+datetime.timedelta(0,t))])
+                except AssertionError:
+                    print "Preview Failed, carrying on..."
+                except KeyboardInterrupt:
+                    del clip.reader
+                    break
+                del clip.reader
+        self.trigger_times = trigger_times
         if save:
             f.close()
             
-        return times
+        return trigger_times
         
     def read_record_times(self,print_progress = True):
         """
@@ -208,12 +217,14 @@ class edit:
             np.save(self.filenames_file,self.filenames)
         return self.filenames
         
-    def get_shift(self,save=True,**kwargs):
+    def get_shift(self,save=True,print_progress=True,**kwargs):
         """
         Gets shift from sync in MultiCam. If save is True it saves it to a numpy array at shift_file.
         """
         self.shift = []
-        for f in self.filenames:
+        for i,f in enumerate(self.filenames):
+            if print_progress:
+                print "syncing "+str(i+1)+" of "+str(len(self.filenames))
             seq = MultiCam.MultiCam(f)
             self.shift.append(seq.sync(**kwargs))
             del seq
