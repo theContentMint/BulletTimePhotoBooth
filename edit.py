@@ -6,17 +6,20 @@ import sys
 from moviepy.video.compositing import MultiCam
 from moviepy.video.io.VideoFileClip import VideoFileClip
 from moviepy.video.io.preview import show, preview
+from moviepy.conf import FFMPEG_BINARY
 import numpy as np
 import datetime
 import csv
 import pygame as pg
 import numpy as np
+import subprocess
+import psutil
 
 def default_cut(start_time,n):
     """
     :param n: number of cameras
     """
-    times = [[start_time-1,0],[start_time+2.0/25,0]]
+    times = [[start_time-1,0]]
     time = start_time+2.0/25
     for i in range(n-1):
         time = time + 2.0/25
@@ -127,7 +130,7 @@ class edit:
             
         # check that camera_slowmo exists else run reinterpret
         for camera in slowmo_cameras:
-            if camera+'_slow' not in os.listdir(self.basefolder):
+            if camera+'_slow' not in os.listdir(self.base_folder):
                 print camera+" is not yet reinterpreted. Run reinterpret."
                 
         
@@ -175,9 +178,17 @@ class edit:
                 except AssertionError:
                     print "Preview Failed, carrying on..."
                 except KeyboardInterrupt:
-                    del clip.reader
+                    ##### clean up #####
+                    clip.reader.close()
+                    if clip.audio:
+                        clip.audio.reader.close_proc()
+                    del clip
                     break
-                del clip.reader
+                ##### clean up #####
+                clip.reader.close()
+                if clip.audio:
+                    clip.audio.reader.close_proc()
+                del clip
         self.trigger_times = trigger_times
         if save:
             f.close()
@@ -240,18 +251,19 @@ class edit:
         """
         # add output options/make the same as input
         for camera in self.slowmo_cameras:
-            out_path = os.path.abspath(os.path.join(self.basefolder,camera+'_slow'))
+            out_path = os.path.abspath(os.path.join(self.base_folder,camera+'_slow'))
             if not os.path.exists(out_path):
                 os.mkdir(out_path)
                 
-            for f in os.listdir(os.path.join(self.basefolder,camera)):
+            for f in os.listdir(os.path.join(self.base_folder,camera)):
                 if self.extension in f:
-                    in_clip = os.path.abspath(os.path.join(self.basefolder,camera,f))
-                    out_clip = os.join(out_path,f)
-                    cmd = ['./ffmpeg','-i',in_clip,'-vf',
+                    in_clip = os.path.abspath(os.path.join(self.base_folder,camera,f))
+                    out_clip = os.path.join(out_path,f)
+                    cmd = [FFMPEG_BINARY,'-i',in_clip,'-vf',
                         'setpts='+str(float(self.slowmo_cameras[camera]))+'*PTS','-r','25',
                         '-vcodec','libx264','-preset','fast','-b:v','5000k','-y',out_clip]
-                    p = subprocess.Popen(cmd)
+                    os.system(' '.join(cmd))
+                    #print p
                     
             
     def edit(self,cut = default_cut,filename='Exports/',extension='.MP4',**kwargs):
@@ -261,39 +273,43 @@ class edit:
         for time in self.trigger_times:
             for j,record_times in enumerate(self.record_times):
                 if time >= record_times[0] and time <= record_times[1]:
-                    if count >=0:
+                    if count >=36:
                         start = (time - record_times[0]).total_seconds() + self.latency[j]
                         times = cut(start,len(self.filenames[j]))
                         filenames = []
                         slowmo = {}
                         for i,camera in enumerate(self.cameras):
                             if camera in self.slowmo_cameras:
-                                if os.path.exists(os.path.join(self.basefolder,camera+"_slow")):
+                                if os.path.exists(os.path.join(self.base_folder,camera+"_slow")):
+                                    
                                     slowmo[i] = self.slowmo_cameras[camera]
-                                    new_path = os.path.abspath(os.path.join(self.basefolder,camera+"_slow",os.path.split(self.filenames[j][i])[1]))
-                                    filenames.append([new_path,self.filenames[j][i][1]])
+                                    new_path = os.path.abspath(os.path.join(self.base_folder,camera+"_slow",os.path.split(self.filenames[j][i])[1]))
+                                    filenames.append(new_path)
                                 else:
                                     print camera+" does not have a slow version. Run reinterpret. Using normal version."
                                     filenames.append(self.filenames[j][i])
                             else:
                                 filenames.append(self.filenames[j][i])
-                                    
+                                
                         seq = MultiCam.MultiCam(filenames,
                             times=times,shift=self.shift[j],slowmo=slowmo)
                         video = seq.get_clip(**self.concat_args)
+                        print psutil.virtual_memory()
                         video.to_videofile(filename+str(count)+extension,**kwargs)
-                        ##### clean up #####
+                        print "Done"
+                        print psutil.virtual_memory()
+                        print "Close MultiCam"
+                        seq.close()
+                        del seq
+                        print psutil.virtual_memory()
+                        print "Close Video"
                         for c in video.clips:
                             if isinstance(c,VideoFileClip):
                                 c.reader.close()
                                 if c.audio:
                                     c.audio.reader.close_proc()
-                        for c in seq.clips:
-                            c.reader.close()
-                            if c.audio:
-                                c.audio.reader.close_proc()
                         del video
-                        del seq
+                        print psutil.virtual_memory()
                     count = count + 1
 
     
